@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+python-multipart
+openai
+pillow
+pydantic
+pydantic-settings
+sqlmodel
+sqlalchemy[asyncio]
+asyncpg
+PyJWT
+passlib
+bcrypt==4.0.1

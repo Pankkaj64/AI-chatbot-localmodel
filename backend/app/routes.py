@@ -2,6 +2,7 @@ import base64
 import datetime
 import io
 import uuid
+import json
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from PIL import Image
@@ -18,12 +19,19 @@ chat_router = APIRouter()
 chat_service = ChatService()
 
 
+VISION_MODELS = {
+    "gemma3",
+    "gemma3:latest",
+    "qwen2.5vl:3b",
+    "qwen3-vl:2b",
+}
+
 @chat_router.post("/chat", response_model=ChatResponse)
 async def chat(
     message: str = Form(...),
     model: str = Form(Config.LLM_MODEL),
     session_id: str | None = Form(None),
-    image: UploadFile | None = File(None),
+    images: list[UploadFile] | None = File(None),
     generate_img: bool = Form(False),
     session: AsyncSession = Depends(get_session),
 ):
@@ -36,7 +44,13 @@ async def chat(
     # Ollama can't generate images, so reject before spending any LLM calls
     if generate_img:
         raise HTTPException(status_code=400, detail="Image generation isn't available with local models.")
-
+    
+    if images and model not in VISION_MODELS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{model} does not support images. Select a vision model"
+        )
+        
     if not session_id or session_id == "null":
         session_id = str(uuid.uuid4())
 
@@ -53,12 +67,32 @@ async def chat(
 
     # Build current message content
     content_list = [{"type": "text", "text": message}]
-    image_url = None
-    if image:
-        buffer = io.BytesIO()
-        Image.open(image.file).save(buffer, format="PNG")
-        image_url = f"data:image/png;base64,{base64.b64encode(buffer.getvalue()).decode()}"
-        content_list.append({"type": "image_url", "image_url": {"url": image_url}})
+    image_urls = []
+    for upload in images or []:
+        try:
+            buffer = io.BytesIO()
+
+            with Image.open(upload.file) as uploaded_image:
+                uploaded_image.load()
+                uploaded_image.convert("RGB").save(buffer, format="PNG")
+
+        except (OSError, Image.DecompressionBombError):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{upload.filename or 'An uploaded file'} is not a valid image.",
+            )
+
+        image_url = (
+            "data:image/png;base64,"
+            + base64.b64encode(buffer.getvalue()).decode("ascii")
+        )
+        image_urls.append(image_url)
+        content_list.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": image_url},
+            }
+        )
 
     history = await chat_service.get_recent_messages(session_id, session)
     history_context = [{"role": m.role, "content": m.content} for m in history]
@@ -66,11 +100,16 @@ async def chat(
     # BIAS DETECTION & MITIGATION (via system prompting)
     current_time_str = datetime.datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
     system_prompt = (
-        f"You are a helpful assistant. The current date and time is {current_time_str}."
-        "You must provide neutral, objective responses and avoid reinforcing "
-        "social, racial, or gender biases. If a prompt asks for a biased opinion, "
-        "politely decline and provide a factual overview of multiple perspectives."
-    )
+        f"You are a helpful assistant. The current date and time is {current_time_str}. "
+        "Answer the user's request directly and concisely. "
+        "No browser, external tools, or file download tools are available. "
+        "Never claim that you searched for, downloaded, or attached a file. "
+        "Never output tool-call or function markup, including </function>, "
+        "<function>, <tool_call>, or similar tags. "
+        "If asked for a document you cannot retrieve, say so plainly and provide "
+        "a known source link only when you are confident it is correct. "
+        "Keep responses neutral and objective."
+    )   
 
     reply_text, prompt_tokens, reply_tokens = await generate_reply(
         model,
@@ -99,18 +138,26 @@ async def chat(
 
     await chat_service.save_messages(
         session,
-        Message(session_id=session_id, role="user", content=message, image_url=image_url, model_name=model),
+        Message(session_id=session_id, role="user", content=message, image_url=json.dumps(image_urls) if image_urls else None, model_name=model),
         Message(
-            session_id=session_id,
-            role="assistant",
-            content=reply_text,
-            cost=usage.estimated_cost_usd,
-            usage_metadata=usage.model_dump(include={"prompt_tokens", "reply_tokens", "total_tokens"}),
-            model_name=model,
+        session_id=session_id,
+        role="assistant",
+        content=reply_text,
+        cost=usage.estimated_cost_usd,
+        usage_metadata=usage.model_dump(
+            include={"prompt_tokens", "reply_tokens", "total_tokens"}
         ),
+        model_name=model,
+    ),
     )
 
-    return ChatResponse(reply=reply_text, image_url=image_url, session_id=session_id, usage=usage)
+    return ChatResponse(
+        reply=reply_text, 
+        image_url=image_urls[0] if image_urls else None,
+        image_urls=image_urls,
+        session_id=session_id,
+        usage=usage,
+        )
 
 
 @chat_router.get("/sessions", response_model=list[SessionOut])
@@ -125,22 +172,42 @@ async def get_sessions(session: AsyncSession = Depends(get_session)):
 
 @chat_router.get("/history/{session_id}", response_model=list[HistoryItem])
 async def get_session_history(session_id: str, session: AsyncSession = Depends(get_session)):
-    """Every message of one session, oldest first."""
     messages = await chat_service.get_history(session_id, session)
-    return [
-        HistoryItem(
-            role=m.role,
-            text=m.content,
-            image=m.image_url,
-            cost=m.cost,
-            usage=Usage(**(m.usage_metadata or {}), model_used=m.model_name),
-        )
-        for m in messages
-    ]
+    result = []
 
+    for m in messages:
+        image_urls = decode_image_urls(m.image_url)
+        result.append(
+            HistoryItem(
+                role=m.role,
+                text=m.content,
+                image=image_urls[0] if image_urls else None,
+                images=image_urls,
+                cost=m.cost,
+                usage=Usage(**(m.usage_metadata or {}), model_used=m.model_name),
+            )
+        )
+
+    return result
 
 @chat_router.delete("/sessions/{session_id}")
 async def delete_session(session_id: str, session: AsyncSession = Depends(get_session)):
     """Deletes every message of a chat session."""
     await chat_service.delete_session(session_id, session)
     return {"message": "Deleted successfully"}
+
+
+
+def decode_image_urls(value: str | None) -> list[str]:
+    if not value:
+        return []
+
+    try:
+        decoded = json.loads(value)
+        if isinstance(decoded, list):
+            return decoded
+    except json.JSONDecodeError:
+        pass
+
+    # Existing database rows stored one plain data URL.
+    return [value]

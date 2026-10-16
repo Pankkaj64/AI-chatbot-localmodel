@@ -1,5 +1,5 @@
 from openai import AsyncOpenAI
-
+import re
 from config import Config
 
 # Ollama speaks the OpenAI API; the SDK requires a key but Ollama ignores it
@@ -41,10 +41,26 @@ async def detect_bias(text: str) -> bool:
 
 async def generate_reply(model: str, messages: list[dict]) -> tuple[str, int, int]:
     """Generates the assistant reply. Returns (reply_text, prompt_tokens, reply_tokens)."""
-    response = await client.chat.completions.create(model=model, messages=messages)
+    response = await client.chat.completions.create(
+        model=model,
+        messages=messages,
+        temperature=0.2,
+        max_tokens=700,
+    )
+
     usage = response.usage
+    reply = response.choices[0].message.content or ""
+
+    # Remove repeated function tags if the model emits them as plain text.
+    reply = re.sub(r"(?:\s*</?function>\s*)+", " ", reply, flags=re.IGNORECASE).strip()
+
+    if not reply:
+        reply = (
+            "I couldn't produce a useful answer. Please try again or select another model."
+        )
+
     return (
-        response.choices[0].message.content,
+        reply,
         usage.prompt_tokens if usage else 0,
         usage.completion_tokens if usage else 0,
     )

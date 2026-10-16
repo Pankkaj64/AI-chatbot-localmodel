@@ -1,5 +1,5 @@
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 
 
@@ -27,3 +27,19 @@ class HistoryItem(BaseModel):
     image: str | None
     cost: float
     usage: Usage | None
+    
+class ChatResponse(BaseModel):
+    reply: str
+    image_url: str | None = None  # first image, for compatibility
+    image_urls: list[str] = Field(default_factory=list)
+    session_id: str
+    usage: Usage | None = None
+
+
+class HistoryItem(BaseModel):
+    role: str
+    text: str
+    image: str | None = None  # first image, for older frontend versions
+    images: list[str] = Field(default_factory=list)
+    cost: float
+    usage: Usage | None = None

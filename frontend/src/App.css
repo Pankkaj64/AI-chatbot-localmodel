@@ -396,3 +396,60 @@ pre, code {
   .text-wrapper { font-size: 0.9rem; }
   .input-actions { flex-wrap: wrap; gap: 10px; }
 }
+
+/* Selected image preview above the chat input */
+.image-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 8px;
+  margin-bottom: 8px;
+  background: #252525;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.image-preview img {
+  display: block;
+  flex: 0 0 64px;
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 7px;
+}
+
+.image-preview-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-main);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-preview button {
+  flex: 0 0 auto;
+  padding: 6px 9px;
+  color: #ddd;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.image-preview button:hover {
+  background: #383838;
+}
+
+.file-label {
+  cursor: pointer;
+  color: #aaa;
+  font-size: 0.85rem;
+}
+
+.file-label:hover {
+  color: var(--text-main);
+}

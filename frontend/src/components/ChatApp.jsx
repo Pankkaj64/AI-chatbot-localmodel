@@ -6,6 +6,7 @@ import ModelSelector from "./ModelSelector";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import "../App.css";
+import ProjectSelector from "./ProjectSelector";
 
 /**
  * ChatApp is the main React component for the chat application.
@@ -54,6 +55,9 @@ export default function ChatApp() {
   const [imagePreviewUrls, setImagePreviewUrls] = useState([]);
   const [isSending, setIsSending] = useState(false);
   const canSend = Boolean(message.trim() || images.length > 0) && !isSending;
+  const [selectedProject, setSelectedProject] = useState(
+    localStorage.getItem("selectedProject") || "",
+  );
   const [selectedModel, setSelectedModel] = useState(() => {
     return localStorage.getItem("preferredModel") || "gemma3";
   });
@@ -183,6 +187,7 @@ export default function ChatApp() {
   formData.append("message", promptToSend);
   formData.append("model", selectedModel);
   formData.append("generate_img", String(generateImg));
+  formData.append("project_name", selectedProject);
 
   images.forEach((file) => formData.append("images", file));
 
@@ -259,6 +264,14 @@ export default function ChatApp() {
     addImages(pastedFiles);
   };
 
+  const handleProjectChange = (projectName) => {
+    if (selectedProject && selectedProject !== projectName) {
+      startNewChat();
+    }
+    localStorage.setItem("selectedProject", projectName);
+    setSelectedProject(projectName);
+  };
+
   return (
     <div className="app-container">
       {error && (
@@ -299,6 +312,10 @@ export default function ChatApp() {
             ☰
           </button>
           <span className="app-title">Modern AI Chat</span>
+          <ProjectSelector
+            value={selectedProject}
+            onChange={handleProjectChange}
+          />
           <ModelSelector
             selectedModel={selectedModel}
             onModelChange={setSelectedModel}

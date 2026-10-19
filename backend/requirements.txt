@@ -11,3 +11,4 @@ asyncpg
 PyJWT
 passlib
 bcrypt==4.0.1
+pypdf
